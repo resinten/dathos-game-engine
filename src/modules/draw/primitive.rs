@@ -1,4 +1,5 @@
-use super::{DrawCommand, SCREEN_HEIGHT, SCREEN_WIDTH};
+use super::DrawCommand;
+use crate::modules::{GameState, WindowOptions};
 use luminance::blending::{Equation, Factor};
 use luminance::context::GraphicsContext;
 use luminance::depth_test::DepthComparison;
@@ -41,10 +42,16 @@ pub struct PrimitiveProgram<'a> {
 }
 
 impl<'a> PrimitiveProgram<'a> {
-    pub fn render<C>(&mut self, shading_gate: &mut ShadingGate<C>, commands: &Vec<DrawCommand>)
-    where
+    pub fn render<C, G>(
+        &mut self,
+        shading_gate: &mut ShadingGate<C>,
+        game_state: &G,
+        commands: &Vec<DrawCommand>,
+    ) where
         C: GraphicsContext,
+        G: GameState,
     {
+        let WindowOptions { width, height, .. } = game_state.window_options();
         let render_state: RenderState = Default::default();
         let render_state = render_state
             .set_blending(Some((
@@ -56,9 +63,7 @@ impl<'a> PrimitiveProgram<'a> {
             .set_face_culling(None);
 
         shading_gate.shade(&self.program, |interface, mut render_gate| {
-            interface
-                .screen_size
-                .update([SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32]);
+            interface.screen_size.update([width as f32, height as f32]);
             interface.hidpi_factor.update(2.0);
             interface.subimage_offset.update([0.0, 0.0]);
 

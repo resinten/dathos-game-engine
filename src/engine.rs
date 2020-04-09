@@ -1,6 +1,6 @@
 use crate::modules::core::CoreModule;
-use crate::modules::draw::{BuildError as DrawBuildError, DrawModule, WindowOptions};
-use crate::modules::EngineModule;
+use crate::modules::draw::{BuildError as DrawBuildError, DrawModule};
+use crate::modules::{EngineModule, GameState};
 use rutie::{AnyException, Class, NilClass, Object, VM};
 use std::path::PathBuf;
 
@@ -17,15 +17,13 @@ pub enum UpdateError {
     Unknown(AnyException),
 }
 
-pub struct Engine {
+pub struct Engine<G>
+where
+    G: GameState,
+{
     entry_script: PathBuf,
-    window_options: WindowOptions,
-    modules: Vec<Box<dyn EngineModule>>,
-}
-
-pub struct EngineOptions {
-    pub window: WindowOptions,
-    pub entry_script: PathBuf,
+    game_state: G,
+    modules: Vec<Box<dyn EngineModule<G>>>,
 }
 
 impl From<DrawBuildError> for Error {
@@ -36,18 +34,21 @@ impl From<UpdateError> for Error {
     fn from(e: UpdateError) -> Self { Error::Update(e) }
 }
 
-impl Engine {
-    pub fn build(options: EngineOptions) -> Self {
+impl<G> Engine<G>
+where
+    G: GameState,
+{
+    pub fn build(entry_script: PathBuf, game_state: G) -> Self {
         Engine {
-            entry_script: options.entry_script,
-            window_options: options.window,
+            entry_script,
+            game_state,
             modules: Vec::new(),
         }
     }
 
     pub fn with_module<M>(mut self, module: M) -> Self
     where
-        M: 'static + EngineModule,
+        M: 'static + EngineModule<G>,
     {
         self.modules.push(box module);
         self
@@ -57,10 +58,8 @@ impl Engine {
         VM::init();
         VM::init_loadpath();
 
-        let window_options = self.window_options.clone();
-        self = self
-            .with_module(CoreModule)
-            .with_module(DrawModule::build(window_options)?);
+        let draw_module = DrawModule::build(&self.game_state)?;
+        self = self.with_module(CoreModule).with_module(draw_module);
 
         self.initialize()?;
         'game: loop {
@@ -81,7 +80,9 @@ impl Engine {
     }
 
     fn initialize(&mut self) -> Result<(), Error> {
-        self.modules.iter_mut().for_each(|m| m.init());
+        let modules = &mut self.modules;
+        let game_state = &mut self.game_state;
+        modules.iter_mut().for_each(|m| m.init(game_state));
         let result = VM::protect(|| {
             VM::require(
                 &self
@@ -99,10 +100,12 @@ impl Engine {
     }
 
     fn update(&mut self) -> Result<(), UpdateError> {
+        let modules = &mut self.modules;
+        let game_state = &mut self.game_state;
         let result = VM::protect(|| {
-            self.modules.iter_mut().for_each(|m| m.pre_update());
-            self.modules.iter_mut().for_each(|m| m.update());
-            self.modules.iter_mut().for_each(|m| m.post_update());
+            modules.iter_mut().for_each(|m| m.pre_update(game_state));
+            modules.iter_mut().for_each(|m| m.update(game_state));
+            modules.iter_mut().for_each(|m| m.post_update(game_state));
             NilClass::new().to_any_object()
         });
         match result {

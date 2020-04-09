@@ -4,7 +4,7 @@ use self::game::GAME_WRAPPER;
 pub use self::game_object::GameObject;
 pub use self::input::{Input, INPUT_WRAPPER};
 pub use self::vector::VectorData;
-use super::EngineModule;
+use super::{EngineModule, GameState};
 use rutie::{Module, Object, VM};
 
 mod color;
@@ -53,8 +53,11 @@ impl CoreModule {
     }
 }
 
-impl EngineModule for CoreModule {
-    fn init(&mut self) {
+impl<G> EngineModule<G> for CoreModule
+where
+    G: GameState,
+{
+    fn init(&mut self, _: &mut G) {
         let _ = VM::eval(GAME_UTILS_MODULE);
 
         self::color::add_color_class();
@@ -68,7 +71,7 @@ impl EngineModule for CoreModule {
         self::input::add_input_module();
     }
 
-    fn pre_update(&mut self) {
+    fn pre_update(&mut self, _: &mut G) {
         let mut inner = Module::from_existing("Game").instance_variable_get("@inner");
         let mut game = inner.get_data_mut(&*GAME_WRAPPER);
         let now = game.time.clock.now();
@@ -77,7 +80,7 @@ impl EngineModule for CoreModule {
         game.time.now = now;
     }
 
-    fn update(&mut self) {
+    fn update(&mut self, _: &mut G) {
         let inner = Module::from_existing("Game").instance_variable_get("@inner");
         let game = inner.get_data(&*GAME_WRAPPER);
         game.game_objects.iter().for_each(GameObject::update);
@@ -89,7 +92,7 @@ impl EngineModule for CoreModule {
             .for_each(GameObject::tidy_coroutines);
     }
 
-    fn post_update(&mut self) {
+    fn post_update(&mut self, _: &mut G) {
         self.handle_pending_deletes();
         self.handle_pending_creates();
     }

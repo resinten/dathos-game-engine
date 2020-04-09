@@ -15,8 +15,10 @@ extern crate lazy_static;
 #[macro_use]
 extern crate rutie;
 
-pub use crate::engine::{Engine, EngineOptions, Error as EngineError};
-pub use crate::modules::EngineModule;
+pub use crate::engine::{Engine, Error as EngineError};
+pub use crate::modules::slack::SlackModule;
+pub use crate::modules::tone::ToneModule;
+pub use crate::modules::{EngineModule, GameState, WindowOptions};
 
 mod engine;
 pub mod ext;

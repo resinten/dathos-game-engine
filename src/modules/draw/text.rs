@@ -1,11 +1,11 @@
 use super::sprite::{
     DrawInstance, SpriteData, SpriteProgram, SpriteProgramBase, SpriteShaderInterface,
 };
-use super::{DrawCommand, ObjectGeometry, SAMPLER, SCREEN_HEIGHT, SCREEN_WIDTH};
+use super::{DrawCommand, ObjectGeometry, SAMPLER};
+use crate::modules::{GameState, WindowOptions};
 use glyph_brush::rusttype::Scale;
 use glyph_brush::{
-    BrushAction, BrushError, GlyphBrush, GlyphBrushBuilder, GlyphVertex, HorizontalAlign, Layout,
-    Section, VerticalAlign,
+    BrushAction, BrushError, GlyphBrush, GlyphBrushBuilder, GlyphVertex, Layout, Section,
 };
 use luminance::context::GraphicsContext;
 use luminance::framebuffer::Framebuffer;
@@ -34,26 +34,23 @@ pub struct TextProgram<'a, 'b> {
 }
 
 impl<'a> TextProgramBase<'a> {
-    pub fn new<C>(graphics_context: &mut C) -> Self
+    pub fn new<C, G>(graphics_context: &mut C, game_state: &G) -> Self
     where
         C: GraphicsContext,
+        G: GameState,
     {
+        let WindowOptions { width, height, .. } = game_state.window_options();
         TextProgramBase {
             text: Texture::<Dim2, NormRGBA8UI>::new(
                 graphics_context,
-                [SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32],
+                [width as u32, height as u32],
                 0,
                 SAMPLER,
             )
             .unwrap(),
             brush: GlyphBrushBuilder::using_font_bytes(MONTSERRAT_REGULAR).build(),
-            buffer: Framebuffer::new(
-                graphics_context,
-                [SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32],
-                0,
-                SAMPLER,
-            )
-            .unwrap(),
+            buffer: Framebuffer::new(graphics_context, [width as u32, height as u32], 0, SAMPLER)
+                .unwrap(),
         }
     }
 
@@ -123,9 +120,14 @@ impl<'a> TextProgramBase<'a> {
 }
 
 impl<'a, 'b> TextProgram<'a, 'b> {
-    pub fn prepare_render<C>(&mut self, graphics_context: &mut C, commands: &Vec<DrawCommand>)
-    where
+    pub fn prepare_render<C, G>(
+        &mut self,
+        graphics_context: &mut C,
+        game_state: &G,
+        commands: &Vec<DrawCommand>,
+    ) where
         C: GraphicsContext,
+        G: GameState,
     {
         commands.iter().for_each(|command| {
             if let DrawCommand::Text {
@@ -180,7 +182,7 @@ impl<'a, 'b> TextProgram<'a, 'b> {
                                     .collect::<Vec<DrawInstance>>(),
                             },
                         }
-                        .render(&pipeline, &mut shading_gate);
+                        .render(&pipeline, &mut shading_gate, game_state);
                     },
                 );
             }
@@ -189,14 +191,19 @@ impl<'a, 'b> TextProgram<'a, 'b> {
             }
             Err(BrushError::TextureTooSmall { suggested }) => {
                 self.text.brush.resize_texture(suggested.0, suggested.1);
-                self.prepare_render(graphics_context, commands);
+                self.prepare_render(graphics_context, game_state, commands);
             }
         };
     }
 
-    pub fn render<C>(&mut self, pipeline: &Pipeline, shading_gate: &mut ShadingGate<C>)
-    where
+    pub fn render<C, G>(
+        &mut self,
+        pipeline: &Pipeline,
+        shading_gate: &mut ShadingGate<C>,
+        game_state: &G,
+    ) where
         C: GraphicsContext,
+        G: GameState,
     {
         let image_size = self.text.buffer.color_slot().size();
         SpriteProgram {
@@ -217,6 +224,6 @@ impl<'a, 'b> TextProgram<'a, 'b> {
                 }],
             },
         }
-        .render(pipeline, shading_gate);
+        .render(pipeline, shading_gate, game_state);
     }
 }

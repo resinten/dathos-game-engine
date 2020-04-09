@@ -4,7 +4,7 @@ use self::sprite::{
 };
 use self::text::{TextProgram, TextProgramBase};
 use super::core::INPUT_WRAPPER;
-use super::EngineModule;
+use super::{EngineModule, GameState};
 use glyph_brush::{HorizontalAlign, VerticalAlign};
 use luminance::context::GraphicsContext;
 use luminance::framebuffer::Framebuffer;
@@ -25,9 +25,6 @@ mod primitive;
 mod ruby;
 mod sprite;
 mod text;
-
-pub const SCREEN_WIDTH: u32 = 640;
-pub const SCREEN_HEIGHT: u32 = 360;
 
 const GENERIC_VERTEX_SHADER: &str = include_str!("./draw/generic_vs.glsl");
 
@@ -62,13 +59,6 @@ pub struct SpritesheetSlice {
     spritesheet: String,
     offset: Vector2<f32>,
     size: Vector2<f32>,
-}
-
-#[derive(Clone)]
-pub struct WindowOptions {
-    pub width: u32,
-    pub height: u32,
-    pub title: String,
 }
 
 #[derive(Clone, Debug)]
@@ -172,7 +162,11 @@ impl Default for ObjectGeometry {
 }
 
 impl<'a> DrawModule<'a> {
-    pub fn build(options: WindowOptions) -> Result<Self, BuildError> {
+    pub fn build<G>(game_state: &G) -> Result<Self, BuildError>
+    where
+        G: GameState,
+    {
+        let options = game_state.window_options();
         let mut surface = GlfwSurface::new(
             WindowDim::Windowed(options.width, options.height),
             &options.title,
@@ -180,7 +174,7 @@ impl<'a> DrawModule<'a> {
         )?;
         let backbuffer = surface.back_buffer().unwrap();
 
-        let text_base = TextProgramBase::new(&mut surface);
+        let text_base = TextProgramBase::new(&mut surface, game_state);
         let tess = TessBuilder::new(&mut surface)
             .set_vertex_nb(4)
             .set_mode(Mode::TriangleFan)
@@ -261,7 +255,10 @@ impl<'a> DrawModule<'a> {
         }
     }
 
-    fn prepare_render(&mut self) {
+    fn prepare_render<G>(&mut self, game_state: &G)
+    where
+        G: GameState,
+    {
         let queue = Module::from_existing("Draw")
             .instance_variable_get("@queue")
             .try_convert_to::<self::ruby::DrawQueue>();
@@ -273,11 +270,14 @@ impl<'a> DrawModule<'a> {
                 program: &self.sprite_program,
                 tess: &self.tess,
             }
-            .prepare_render(&mut self.surface, commands);
+            .prepare_render(&mut self.surface, game_state, commands);
         }
     }
 
-    fn render(&mut self) {
+    fn render<G>(&mut self, game_state: &G)
+    where
+        G: GameState,
+    {
         let surface = &mut self.surface;
         let primitive_program = &self.primitive_program;
         let sprite_base = &self.sprite_base;
@@ -305,13 +305,13 @@ impl<'a> DrawModule<'a> {
                         tess,
                         object: SpriteData::Commands(commands),
                     }
-                    .render(&pipeline, &mut shading_gate);
+                    .render(&pipeline, &mut shading_gate, game_state);
 
                     PrimitiveProgram {
                         program: primitive_program,
                         tess,
                     }
-                    .render(&mut shading_gate, commands);
+                    .render(&mut shading_gate, game_state, commands);
 
                     TextProgram {
                         sprite: sprite_base,
@@ -319,7 +319,7 @@ impl<'a> DrawModule<'a> {
                         program: sprite_program,
                         tess,
                     }
-                    .render(&pipeline, &mut shading_gate);
+                    .render(&pipeline, &mut shading_gate, game_state);
                 }
             },
         );
@@ -328,8 +328,11 @@ impl<'a> DrawModule<'a> {
     }
 }
 
-impl<'a> EngineModule for DrawModule<'a> {
-    fn init(&mut self) {
+impl<'a, G> EngineModule<G> for DrawModule<'a>
+where
+    G: GameState,
+{
+    fn init(&mut self, _: &mut G) {
         let mut module = Module::new("Draw");
         module.define_nested_class("DrawQueue", None);
         module.instance_variable_set("@queue", self::ruby::DrawQueue::new());
@@ -346,7 +349,7 @@ impl<'a> EngineModule for DrawModule<'a> {
         module.def_self("text!", self::ruby::draw_text);
     }
 
-    fn pre_update(&mut self) {
+    fn pre_update(&mut self, _: &mut G) {
         self.clear_commands();
 
         let mut key_events = Vec::new();
@@ -366,9 +369,9 @@ impl<'a> EngineModule for DrawModule<'a> {
         }
     }
 
-    fn post_update(&mut self) {
+    fn post_update(&mut self, game_state: &mut G) {
         self.handle_spritesheet_loading();
-        self.prepare_render();
-        self.render();
+        self.prepare_render(game_state);
+        self.render(game_state);
     }
 }

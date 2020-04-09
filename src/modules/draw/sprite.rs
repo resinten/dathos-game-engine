@@ -1,4 +1,5 @@
-use super::{DrawCommand, ObjectGeometry, SCREEN_HEIGHT, SCREEN_WIDTH};
+use super::{DrawCommand, ObjectGeometry};
+use crate::modules::{GameState, WindowOptions};
 use luminance::blending::{Equation, Factor};
 use luminance::context::GraphicsContext;
 use luminance::depth_test::DepthComparison;
@@ -128,9 +129,14 @@ impl SpriteProgramBase {
 }
 
 impl<'a> SpriteProgram<'a> {
-    pub fn render<C>(&mut self, pipeline: &Pipeline, shading_gate: &mut ShadingGate<C>)
-    where
+    pub fn render<C, G>(
+        &mut self,
+        pipeline: &Pipeline,
+        shading_gate: &mut ShadingGate<C>,
+        game_state: &G,
+    ) where
         C: GraphicsContext,
+        G: GameState,
     {
         let instances_list = match self.object {
             SpriteData::Commands(commands) => {
@@ -165,20 +171,30 @@ impl<'a> SpriteProgram<'a> {
             } => vec![(texture, depth_buffer, (*instances).clone())],
         };
         for (texture, depth_buffer, instances) in instances_list {
-            self.render_instances(pipeline, shading_gate, texture, depth_buffer, instances);
+            self.render_instances(
+                pipeline,
+                shading_gate,
+                game_state,
+                texture,
+                depth_buffer,
+                instances,
+            );
         }
     }
 
-    fn render_instances<C>(
+    fn render_instances<C, G>(
         &mut self,
         pipeline: &Pipeline,
         shading_gate: &mut ShadingGate<C>,
+        game_state: &G,
         texture: &Texture<Dim2, NormRGBA8UI>,
         depth_buffer: Option<&Texture<Dim2, Depth32F>>,
         instances: Vec<DrawInstance>,
     ) where
         C: GraphicsContext,
+        G: GameState,
     {
+        let WindowOptions { width, height, .. } = game_state.window_options();
         let render_state: RenderState = Default::default();
         let render_state = render_state
             .set_blending(Some((
@@ -199,9 +215,7 @@ impl<'a> SpriteProgram<'a> {
             //     interface.use_depth_buffer.update(false);
             // }
 
-            interface
-                .screen_size
-                .update([SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32]);
+            interface.screen_size.update([width as f32, height as f32]);
             interface.hidpi_factor.update(2.0);
             interface
                 .image_size

@@ -4,6 +4,9 @@ AllCops:
 Layout/MultilineMethodCallIndentation:
   EnforcedStyle: indented
 
+Metrics/MethodLength:
+  Max: 20
+
 Style/HashEachMethods:
   Enabled: true
 Style/HashTransformKeys:
