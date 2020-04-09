@@ -39,15 +39,17 @@ impl CoreModule {
     fn handle_pending_creates(&mut self) {
         let mut inner = Module::from_existing("Game").instance_variable_get("@inner");
         let game = inner.get_data_mut(&*GAME_WRAPPER);
-        game.pending_creates.iter_mut().for_each(|game_object| {
+        let mut creates = Vec::new();
+        creates.append(&mut game.pending_creates);
+        for game_object in &mut creates {
             let coroutines = game_object
                 .instance_variable_get("@coroutines")
                 .try_convert_to::<Coroutines>()
                 .unwrap_or_else(|_| Coroutines::new());
             game_object.instance_variable_set("@coroutines", coroutines);
             game_object.on_start();
-        });
-        game.game_objects.append(&mut game.pending_creates);
+        }
+        game.game_objects.append(&mut creates);
     }
 }
 

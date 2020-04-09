@@ -82,12 +82,19 @@ impl Engine {
 
     fn initialize(&mut self) -> Result<(), Error> {
         self.modules.iter_mut().for_each(|m| m.init());
-        VM::require(
-            &self
-                .entry_script
-                .to_str()
-                .ok_or(Error::InvalidEntryScript(self.entry_script.clone()))?,
-        );
+        let result = VM::protect(|| {
+            VM::require(
+                &self
+                    .entry_script
+                    .to_str()
+                    .ok_or(Error::InvalidEntryScript(self.entry_script.clone()))
+                    .unwrap(),
+            );
+            NilClass::new().to_any_object()
+        });
+        if let Err(_) = result {
+            println!("Error: {:?}", VM::error_info());
+        }
         Ok(())
     }
 

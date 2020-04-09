@@ -134,13 +134,13 @@ impl<'a, 'b> TextProgram<'a, 'b> {
                 position,
                 size,
                 text,
+                h_align,
+                v_align,
             } = command
             {
                 self.text.brush.queue(Section {
                     color: *color,
-                    layout: Layout::default_wrap()
-                        .h_align(HorizontalAlign::Center)
-                        .v_align(VerticalAlign::Center),
+                    layout: Layout::default_wrap().h_align(*h_align).v_align(*v_align),
                     scale: Scale::uniform(*size),
                     screen_position: (position.x, -position.y),
                     text: &text,

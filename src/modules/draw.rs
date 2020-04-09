@@ -1,19 +1,25 @@
 use self::primitive::{PrimitiveProgram, PrimitiveShaderInterface};
-use self::sprite::{SpriteData, SpriteProgram, SpriteProgramBase, SpriteShaderInterface};
+use self::sprite::{
+    SpriteData, SpriteProgram, SpriteProgramBase, SpriteShaderInterface, SpritesheetLoader,
+};
 use self::text::{TextProgram, TextProgramBase};
 use super::core::INPUT_WRAPPER;
 use super::EngineModule;
+use glyph_brush::{HorizontalAlign, VerticalAlign};
 use luminance::context::GraphicsContext;
 use luminance::framebuffer::Framebuffer;
 use luminance::pipeline::PipelineState;
+use luminance::pixel::NormRGBA8UI;
 use luminance::shader::program::{Program, ProgramError};
 use luminance::tess::{Mode, Tess, TessBuilder, TessError};
-use luminance::texture::{DepthComparison, Dim2, MagFilter, MinFilter, Sampler, Wrap};
+use luminance::texture::{Dim2, GenMipmaps, MagFilter, MinFilter, Sampler, Texture, Wrap};
 use luminance_glfw::{
     Action, GlfwSurface, GlfwSurfaceError, Key, Surface, WindowDim, WindowEvent, WindowOpt,
 };
 use nalgebra::{Vector2, Vector4};
 use rutie::{Module, Object};
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender};
 
 mod primitive;
 mod ruby;
@@ -44,6 +50,20 @@ pub enum BuildError {
     Tess(TessError),
 }
 
+#[derive(Clone, Debug)]
+pub struct SpritesheetLoadRequest {
+    name: String,
+    path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub struct SpritesheetSlice {
+    name: String,
+    spritesheet: String,
+    offset: Vector2<f32>,
+    size: Vector2<f32>,
+}
+
 #[derive(Clone)]
 pub struct WindowOptions {
     pub width: u32,
@@ -66,6 +86,9 @@ pub struct ObjectGeometry {
 pub struct DrawModule<'a> {
     surface: GlfwSurface,
     backbuffer: Framebuffer<Dim2, (), ()>,
+
+    load_requests: Sender<(String, PathBuf)>,
+    loaded_textures: Receiver<(String, Vector2<u32>, Vec<u8>)>,
 
     primitive_program: Program<(), (), PrimitiveShaderInterface>,
     sprite_base: SpriteProgramBase,
@@ -106,13 +129,18 @@ pub enum DrawCommand {
         position: Vector2<f32>,
         rotation: f32,
     },
-    Sprite,
+    Sprite {
+        sprite: String,
+        geometry: ObjectGeometry,
+    },
     Text {
         depth: f32,
         color: [f32; 4],
         position: Vector2<f32>,
         size: f32,
         text: String,
+        h_align: HorizontalAlign,
+        v_align: VerticalAlign,
     },
 }
 
@@ -158,9 +186,15 @@ impl<'a> DrawModule<'a> {
             .set_mode(Mode::TriangleFan)
             .build()?;
 
+        let (load_requests, loaded_textures, spritesheet_loader) = SpritesheetLoader::build();
+        std::thread::spawn(|| spritesheet_loader.run());
+
         Ok(DrawModule {
             surface,
             backbuffer,
+
+            load_requests,
+            loaded_textures,
 
             primitive_program: Program::<(), (), PrimitiveShaderInterface>::from_strings(
                 None,
@@ -197,6 +231,36 @@ impl<'a> DrawModule<'a> {
         input_inner.handle_key_event(key, action);
     }
 
+    fn handle_spritesheet_loading(&mut self) {
+        let queue = Module::from_existing("Draw")
+            .instance_variable_get("@queue")
+            .try_convert_to::<self::ruby::DrawQueue>();
+        if let Ok(mut queue) = queue {
+            {
+                let pending_spritesheets = AsMut::<Vec<SpritesheetLoadRequest>>::as_mut(&mut queue);
+                pending_spritesheets.drain(..).for_each(|ps| {
+                    let _ = self.load_requests.send((ps.name, ps.path));
+                });
+            }
+            {
+                let pending_sprites = AsMut::<Vec<SpritesheetSlice>>::as_mut(&mut queue);
+                pending_sprites.drain(..).for_each(|ps| {
+                    self.sprite_base
+                        .sprites
+                        .insert(ps.name, (ps.spritesheet, ps.offset, ps.size));
+                });
+            }
+        }
+
+        while let Ok((name, size, texels)) = self.loaded_textures.try_recv() {
+            let texture =
+                Texture::<Dim2, NormRGBA8UI>::new(&mut self.surface, [size.x, size.y], 0, SAMPLER)
+                    .unwrap();
+            texture.upload_raw(GenMipmaps::No, &texels).unwrap();
+            self.sprite_base.spritesheets.insert(name, texture);
+        }
+    }
+
     fn prepare_render(&mut self) {
         let queue = Module::from_existing("Draw")
             .instance_variable_get("@queue")
@@ -223,7 +287,7 @@ impl<'a> DrawModule<'a> {
 
         let pipeline_state = PipelineState::new()
             .enable_clear_color(true)
-            .set_clear_color([0.0, 0.0, 0.0, 0.0]);
+            .set_clear_color([1.0, 1.0, 1.0, 1.0]);
 
         surface.pipeline_builder().pipeline(
             &self.backbuffer,
@@ -270,6 +334,9 @@ impl<'a> EngineModule for DrawModule<'a> {
         module.define_nested_class("DrawQueue", None);
         module.instance_variable_set("@queue", self::ruby::DrawQueue::new());
 
+        module.def_self("load_spritesheet", self::ruby::load_spritesheet);
+        module.def_self("create_sprite", self::ruby::create_sprite);
+
         module.def_self("arc!", self::ruby::draw_arc);
         module.def_self("circle!", self::ruby::draw_circle);
         module.def_self("line!", self::ruby::draw_line);
@@ -300,6 +367,7 @@ impl<'a> EngineModule for DrawModule<'a> {
     }
 
     fn post_update(&mut self) {
+        self.handle_spritesheet_loading();
         self.prepare_render();
         self.render();
     }

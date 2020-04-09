@@ -3,7 +3,7 @@ use luminance::blending::{Equation, Factor};
 use luminance::context::GraphicsContext;
 use luminance::depth_test::DepthComparison;
 use luminance::pipeline::{BoundTexture, Pipeline, ShadingGate};
-use luminance::pixel::{Depth32F, Floating, NormRGBA8UI, NormUnsigned};
+use luminance::pixel::{Depth32F, NormRGBA8UI, NormUnsigned};
 use luminance::render_state::RenderState;
 use luminance::shader::program::{Program, Uniform};
 use luminance::tess::Tess;
@@ -11,6 +11,10 @@ use luminance::texture::{Dim2, Texture};
 use luminance_derive::UniformInterface;
 use nalgebra::Vector2;
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver, Sender};
 
 #[derive(UniformInterface)]
 pub struct SpriteShaderInterface {
@@ -34,8 +38,14 @@ pub struct SpriteShaderInterface {
     pub desaturation: Uniform<f32>,
 }
 
+pub struct SpritesheetLoader {
+    load_requests: Receiver<(String, PathBuf)>,
+    loaded_textures: Sender<(String, Vector2<u32>, Vec<u8>)>,
+}
+
 pub struct SpriteProgramBase {
     pub spritesheets: BTreeMap<String, Texture<Dim2, NormRGBA8UI>>,
+    pub sprites: BTreeMap<String, (String, Vector2<f32>, Vector2<f32>)>,
 }
 
 pub struct SpriteProgram<'a> {
@@ -55,16 +65,64 @@ pub enum SpriteData<'a> {
     },
 }
 
+#[derive(Clone)]
 pub struct DrawInstance {
     pub offset: Vector2<f32>,
     pub size: Vector2<f32>,
     pub geometry: ObjectGeometry,
 }
 
+impl SpritesheetLoader {
+    pub fn build() -> (
+        Sender<(String, PathBuf)>,
+        Receiver<(String, Vector2<u32>, Vec<u8>)>,
+        Self,
+    ) {
+        let (load_requests_sender, load_requests_receiver) = channel();
+        let (loaded_textures_sender, loaded_textures_receiver) = channel();
+        (
+            load_requests_sender,
+            loaded_textures_receiver,
+            SpritesheetLoader {
+                load_requests: load_requests_receiver,
+                loaded_textures: loaded_textures_sender,
+            },
+        )
+    }
+
+    pub fn run(self) {
+        loop {
+            for (name, path) in self.load_requests.recv() {
+                println!("Loading sprite {}", name);
+                let buffer: Option<(Vector2<u32>, Vec<u8>)> = try {
+                    let buffer = image::load(
+                        BufReader::new(File::open(path).ok()?),
+                        image::ImageFormat::Png,
+                    )
+                    .ok()?
+                    .flipv()
+                    .to_rgba();
+                    let (width, height) = buffer.dimensions();
+                    ([width, height].into(), buffer.into_raw())
+                };
+                if let Some((dimensions, buffer)) = buffer {
+                    let result = self.loaded_textures.send((name, dimensions, buffer));
+                    if let Err(_) = result {
+                        println!("Failed to send a loaded spritesheet to the draw module");
+                    }
+                } else {
+                    println!("Failed to load an image for a spritesheet");
+                }
+            }
+        }
+    }
+}
+
 impl SpriteProgramBase {
     pub fn new() -> Self {
         SpriteProgramBase {
             spritesheets: BTreeMap::new(),
+            sprites: BTreeMap::new(),
         }
     }
 }
@@ -75,12 +133,36 @@ impl<'a> SpriteProgram<'a> {
         C: GraphicsContext,
     {
         let instances_list = match self.object {
-            SpriteData::Commands(commands) => vec![],
+            SpriteData::Commands(commands) => {
+                let mut grouped_commands = BTreeMap::new();
+                for command in commands {
+                    if let DrawCommand::Sprite { sprite, geometry } = command {
+                        if let Some((spritesheet, offset, size)) = self.base.sprites.get(sprite) {
+                            grouped_commands
+                                .entry(spritesheet)
+                                .or_insert_with(|| Vec::new())
+                                .push(DrawInstance {
+                                    offset: *offset,
+                                    size: *size,
+                                    geometry: geometry.clone(),
+                                });
+                        } else {
+                            println!("Could not find wprite {:?}", sprite);
+                        }
+                    }
+                }
+                grouped_commands
+                    .into_iter()
+                    .filter_map(|(spritesheet, instances)| {
+                        Some((self.base.spritesheets.get(spritesheet)?, None, instances))
+                    })
+                    .collect::<Vec<_>>()
+            }
             SpriteData::Override {
                 texture,
                 depth_buffer,
                 instances,
-            } => vec![(texture, depth_buffer, instances)],
+            } => vec![(texture, depth_buffer, (*instances).clone())],
         };
         for (texture, depth_buffer, instances) in instances_list {
             self.render_instances(pipeline, shading_gate, texture, depth_buffer, instances);
@@ -93,7 +175,7 @@ impl<'a> SpriteProgram<'a> {
         shading_gate: &mut ShadingGate<C>,
         texture: &Texture<Dim2, NormRGBA8UI>,
         depth_buffer: Option<&Texture<Dim2, Depth32F>>,
-        instances: &Vec<DrawInstance>,
+        instances: Vec<DrawInstance>,
     ) where
         C: GraphicsContext,
     {
@@ -131,8 +213,8 @@ impl<'a> SpriteProgram<'a> {
                 geometry,
             } in instances
             {
-                interface.subimage_offset.update((*offset).into());
-                interface.subimage_size.update((*size).into());
+                interface.subimage_offset.update(offset.into());
+                interface.subimage_size.update(size.into());
 
                 // Tweak because everything gets rendered upside down
                 let mut origin = geometry.origin;

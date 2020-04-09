@@ -95,17 +95,51 @@ fn get_current_frame() -> u64 {
 }
 
 fn get_key_name(key: Key) -> Option<String> {
-    key.get_name().map(|s| s.to_lowercase()).or_else(|| {
-        match key {
-            Key::Escape => Some("escape"),
-            Key::Up => Some("up"),
-            Key::Down => Some("down"),
-            Key::Left => Some("left"),
-            Key::Right => Some("right"),
-            _ => None,
-        }
-        .map(|s| s.to_string())
-    })
+    let result = key
+        .get_name()
+        .map(|s| s.to_lowercase())
+        .or_else(|| {
+            match key {
+                Key::Escape => Some("escape"),
+                Key::Up => Some("up"),
+                Key::Down => Some("down"),
+                Key::Left => Some("left"),
+                Key::Right => Some("right"),
+                Key::Num1 => Some("num1"),
+                Key::Num2 => Some("num2"),
+                Key::Num3 => Some("num3"),
+                Key::Num4 => Some("num4"),
+                Key::Num5 => Some("num5"),
+                Key::Num6 => Some("num6"),
+                Key::Num7 => Some("num7"),
+                Key::Num8 => Some("num8"),
+                Key::Num9 => Some("num9"),
+                Key::Num0 => Some("num0"),
+                _ => {
+                    println!("Unrecognized key: {:?}", key);
+                    None
+                }
+            }
+            .map(|s| s.to_string())
+        })
+        .map(|s| {
+            match s.as_str() {
+                "1" => "_1",
+                "2" => "_2",
+                "3" => "_3",
+                "4" => "_4",
+                "5" => "_5",
+                "6" => "_6",
+                "7" => "_7",
+                "8" => "_8",
+                "9" => "_9",
+                "0" => "_0",
+                _ => &s,
+            }
+            .to_string()
+        });
+    println!("Key: {:?}", result);
+    result
 }
 
 pub fn add_input_module() {

@@ -1,4 +1,5 @@
 use crate::ext::HashExt;
+use nalgebra::Vector4;
 use rutie::{Class, Float, Hash, Object, VerifiedObject};
 
 wrappable_struct!(ColorInner, ColorWrapper, COLOR_WRAPPER);
@@ -21,6 +22,10 @@ impl From<[f32; 4]> for ColorData {
 
 impl Into<[f32; 4]> for ColorData {
     fn into(self) -> [f32; 4] { self.get_data(&*COLOR_WRAPPER).color }
+}
+
+impl Into<Vector4<f32>> for ColorData {
+    fn into(self) -> Vector4<f32> { self.get_data(&*COLOR_WRAPPER).color.into() }
 }
 
 #[rustfmt::skip]

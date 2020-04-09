@@ -70,7 +70,7 @@ impl<'a> PrimitiveProgram<'a> {
                     DrawCommand::Circle { .. } => 1,
                     DrawCommand::Line { .. } => 2,
                     DrawCommand::Rectangle { .. } => 3,
-                    DrawCommand::Sprite => 4,
+                    DrawCommand::Sprite { .. } => 4,
                     DrawCommand::Text { .. } => 5,
                 });
                 interface.origin.update([0.5, 0.5]);
@@ -163,7 +163,7 @@ impl<'a> PrimitiveProgram<'a> {
                         interface.color.update(*color);
                         true
                     }
-                    DrawCommand::Sprite => false,
+                    DrawCommand::Sprite { .. } => false,
                     DrawCommand::Text { .. } => false,
                 };
 

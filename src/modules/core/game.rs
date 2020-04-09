@@ -1,3 +1,4 @@
+use super::coroutines::Coroutines;
 use super::game_object::GameObject;
 use super::vector::VectorData;
 use crate::ext::AnyNumber;
@@ -53,7 +54,8 @@ methods!(
     }
 
     fn create_object(object: GameObject) -> GameObject {
-        let object = object.unwrap();
+        let mut object = object.unwrap();
+        object.instance_variable_set("@coroutines", Coroutines::new());
         _itself
             .instance_variable_get("@inner")
             .get_data_mut(&*GAME_WRAPPER).pending_creates.push(object.clone());

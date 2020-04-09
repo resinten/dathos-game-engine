@@ -1,9 +1,11 @@
-use super::DrawCommand;
+use super::{DrawCommand, ObjectGeometry, SpritesheetLoadRequest, SpritesheetSlice};
 use crate::ext::{AnyNumber, HashExt, RotationExt};
 use crate::modules::core::{ColorData, VectorData};
+use glyph_brush::{HorizontalAlign, VerticalAlign};
 use nalgebra::Vector2;
-use rutie::{Hash, Module, NilClass, Object, RString, VerifiedObject};
+use rutie::{Hash, Module, NilClass, Object, RString, Symbol, VerifiedObject};
 use std::f32::consts::PI;
+use std::path::PathBuf;
 
 wrappable_struct!(DrawQueueInner, DrawQueueWrapper, DRAW_QUEUE_WRAPPER);
 
@@ -13,9 +15,36 @@ class!(DrawQueue);
 
 pub struct DrawQueueInner {
     pub queue: Vec<DrawCommand>,
+    pub pending_spritesheets: Vec<SpritesheetLoadRequest>,
+    pub pending_sprites: Vec<SpritesheetSlice>,
 }
 
 impl Draw {
+    fn load_spritesheet(&mut self, name: String, path: PathBuf) {
+        let mut queue = self.instance_variable_get("@queue");
+        let queue_inner = queue.get_data_mut(&*DRAW_QUEUE_WRAPPER);
+        queue_inner
+            .pending_spritesheets
+            .push(SpritesheetLoadRequest { name, path });
+    }
+
+    fn create_sprite(
+        &mut self,
+        name: String,
+        spritesheet: String,
+        offset: Vector2<f32>,
+        size: Vector2<f32>,
+    ) {
+        let mut queue = self.instance_variable_get("@queue");
+        let queue_inner = queue.get_data_mut(&*DRAW_QUEUE_WRAPPER);
+        queue_inner.pending_sprites.push(SpritesheetSlice {
+            name,
+            spritesheet,
+            offset,
+            size,
+        });
+    }
+
     fn draw(&mut self, command: DrawCommand) {
         let mut queue = self.instance_variable_get("@queue");
         let queue_inner = queue.get_data_mut(&*DRAW_QUEUE_WRAPPER);
@@ -27,6 +56,26 @@ impl Draw {
 methods!(
     Draw,
     _itself,
+
+    fn load_spritesheet(name: Symbol, path: RString) -> NilClass {
+        _itself.load_spritesheet(name.unwrap().to_string(), From::from(path.unwrap().to_string()));
+        NilClass::new()
+    }
+
+    fn create_sprite(
+        name: Symbol,
+        spritesheet: Symbol,
+        offset: VectorData,
+        size: VectorData
+    ) -> NilClass {
+        _itself.create_sprite(
+            name.unwrap().to_string(),
+            spritesheet.unwrap().to_string(),
+            offset.unwrap().into(),
+            size.unwrap().into(),
+        );
+        NilClass::new()
+    }
 
     fn draw_arc(options: Hash) -> NilClass {
         let options = options.unwrap();
@@ -97,7 +146,42 @@ methods!(
     }
 
     fn draw_sprite(options: Hash) -> NilClass {
-        unimplemented!("Not implemented yet");
+        let options = options.unwrap();
+        let sprite = options.get_as::<Symbol>("sprite").map(|s| s.to_string());
+        let default_geometry = ObjectGeometry::default();
+        if let Some(sprite) = sprite {
+            _itself.draw(DrawCommand::Sprite {
+                sprite,
+                geometry: ObjectGeometry {
+                    brighten: options
+                        .get_as::<ColorData>("brighten")
+                        .map(Into::into)
+                        .unwrap_or(default_geometry.brighten),
+                    darken: options
+                        .get_as::<ColorData>("darken")
+                        .map(Into::into)
+                        .unwrap_or(default_geometry.darken),
+                    depth: options.get_num("depth").unwrap_or(default_geometry.depth),
+                    desaturation: options
+                        .get_num("desaturation")
+                        .unwrap_or(default_geometry.desaturation),
+                    origin: options
+                        .get_as::<VectorData>("origin")
+                        .map(Into::into)
+                        .unwrap_or(default_geometry.origin),
+                    position: options
+                        .get_as::<VectorData>("position")
+                        .map(Into::into)
+                        .unwrap_or(default_geometry.position),
+                    rotation: options.get_num("rotation").unwrap_or(default_geometry.rotation),
+                    scale: options
+                        .get_as::<VectorData>("scale")
+                        .map(Into::into)
+                        .unwrap_or(default_geometry.scale),
+                },
+            });
+        }
+        NilClass::new()
     }
 
     fn draw_text(options: Hash) -> NilClass {
@@ -116,6 +200,24 @@ methods!(
             text: options.get_as::<RString>("text")
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "".to_string()),
+            h_align: options.get_as::<Symbol>("halign").and_then(|h| {
+                match h.to_string().to_lowercase().as_str() {
+                    "left" => Some(HorizontalAlign::Left),
+                    "center" => Some(HorizontalAlign::Center),
+                    "middle" => Some(HorizontalAlign::Center),
+                    "right" => Some(HorizontalAlign::Right),
+                    _ => None,
+                }
+            }).unwrap_or(HorizontalAlign::Center),
+            v_align: options.get_as::<Symbol>("valign").and_then(|v| {
+                match v.to_string().to_lowercase().as_str() {
+                    "top" => Some(VerticalAlign::Top),
+                    "center" => Some(VerticalAlign::Center),
+                    "middle" => Some(VerticalAlign::Center),
+                    "bottom" => Some(VerticalAlign::Bottom),
+                    _ => None,
+                }
+            }).unwrap_or(VerticalAlign::Center),
         });
         NilClass::new()
     }
@@ -125,13 +227,32 @@ impl DrawQueue {
     pub fn new() -> Self {
         Module::from_existing("Draw")
             .get_nested_class("DrawQueue")
-            .wrap_data(DrawQueueInner { queue: Vec::new() }, &*DRAW_QUEUE_WRAPPER)
+            .wrap_data(
+                DrawQueueInner {
+                    queue: Vec::new(),
+                    pending_spritesheets: Vec::new(),
+                    pending_sprites: Vec::new(),
+                },
+                &*DRAW_QUEUE_WRAPPER,
+            )
     }
 }
 
 impl AsMut<Vec<DrawCommand>> for DrawQueue {
     fn as_mut(&mut self) -> &mut Vec<DrawCommand> {
         &mut self.get_data_mut(&*DRAW_QUEUE_WRAPPER).queue
+    }
+}
+
+impl AsMut<Vec<SpritesheetLoadRequest>> for DrawQueue {
+    fn as_mut(&mut self) -> &mut Vec<SpritesheetLoadRequest> {
+        &mut self.get_data_mut(&*DRAW_QUEUE_WRAPPER).pending_spritesheets
+    }
+}
+
+impl AsMut<Vec<SpritesheetSlice>> for DrawQueue {
+    fn as_mut(&mut self) -> &mut Vec<SpritesheetSlice> {
+        &mut self.get_data_mut(&*DRAW_QUEUE_WRAPPER).pending_sprites
     }
 }
 
