@@ -1,7 +1,7 @@
+use self::font_loader::FontLoader;
 use self::primitive::{PrimitiveProgram, PrimitiveShaderInterface};
-use self::sprite::{
-    SpriteData, SpriteProgram, SpriteProgramBase, SpriteShaderInterface, SpritesheetLoader,
-};
+use self::sprite::{SpriteData, SpriteProgram, SpriteProgramBase, SpriteShaderInterface};
+use self::spritesheet_loader::SpritesheetLoader;
 use self::text::{TextProgram, TextProgramBase};
 use super::core::INPUT_WRAPPER;
 use super::{EngineModule, GameState};
@@ -21,9 +21,11 @@ use rutie::{Module, Object};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
+mod font_loader;
 mod primitive;
 mod ruby;
 mod sprite;
+mod spritesheet_loader;
 mod text;
 
 const GENERIC_VERTEX_SHADER: &str = include_str!("./draw/generic_vs.glsl");
@@ -77,7 +79,9 @@ pub struct DrawModule<'a> {
     surface: GlfwSurface,
     backbuffer: Framebuffer<Dim2, (), ()>,
 
-    load_requests: Sender<(String, PathBuf)>,
+    load_font_requests: Sender<(String, PathBuf)>,
+    load_spritesheet_requests: Sender<(String, PathBuf)>,
+    loaded_fonts: Receiver<(String, Vec<u8>)>,
     loaded_textures: Receiver<(String, Vector2<u32>, Vec<u8>)>,
 
     primitive_program: Program<(), (), PrimitiveShaderInterface>,
@@ -124,6 +128,7 @@ pub enum DrawCommand {
         geometry: ObjectGeometry,
     },
     Text {
+        font: Option<String>,
         depth: f32,
         color: [f32; 4],
         position: Vector2<f32>,
@@ -180,14 +185,19 @@ impl<'a> DrawModule<'a> {
             .set_mode(Mode::TriangleFan)
             .build()?;
 
-        let (load_requests, loaded_textures, spritesheet_loader) = SpritesheetLoader::build();
+        let (load_font_requests, loaded_fonts, font_loader) = FontLoader::build();
+        let (load_spritesheet_requests, loaded_textures, spritesheet_loader) =
+            SpritesheetLoader::build();
+        std::thread::spawn(|| font_loader.run());
         std::thread::spawn(|| spritesheet_loader.run());
 
         Ok(DrawModule {
             surface,
             backbuffer,
 
-            load_requests,
+            load_font_requests,
+            load_spritesheet_requests,
+            loaded_fonts,
             loaded_textures,
 
             primitive_program: Program::<(), (), PrimitiveShaderInterface>::from_strings(
@@ -225,6 +235,23 @@ impl<'a> DrawModule<'a> {
         input_inner.handle_key_event(key, action);
     }
 
+    fn handle_font_loading(&mut self) {
+        let queue = Module::from_existing("Draw")
+            .instance_variable_get("@queue")
+            .try_convert_to::<self::ruby::DrawQueue>();
+        if let Ok(mut queue) = queue {
+            let pending_fonts = AsMut::<Vec<(String, PathBuf)>>::as_mut(&mut queue);
+            pending_fonts.drain(..).for_each(|pf| {
+                let _ = self.load_font_requests.send(pf);
+            });
+        }
+
+        while let Ok((name, font_bytes)) = self.loaded_fonts.try_recv() {
+            let font_id = self.text_base.brush.add_font_bytes(font_bytes);
+            self.text_base.fonts.insert(name, font_id);
+        }
+    }
+
     fn handle_spritesheet_loading(&mut self) {
         let queue = Module::from_existing("Draw")
             .instance_variable_get("@queue")
@@ -233,7 +260,7 @@ impl<'a> DrawModule<'a> {
             {
                 let pending_spritesheets = AsMut::<Vec<SpritesheetLoadRequest>>::as_mut(&mut queue);
                 pending_spritesheets.drain(..).for_each(|ps| {
-                    let _ = self.load_requests.send((ps.name, ps.path));
+                    let _ = self.load_spritesheet_requests.send((ps.name, ps.path));
                 });
             }
             {
@@ -337,6 +364,7 @@ where
         module.define_nested_class("DrawQueue", None);
         module.instance_variable_set("@queue", self::ruby::DrawQueue::new());
 
+        module.def_self("load_font", self::ruby::load_font);
         module.def_self("load_spritesheet", self::ruby::load_spritesheet);
         module.def_self("create_sprite", self::ruby::create_sprite);
 
@@ -370,6 +398,7 @@ where
     }
 
     fn post_update(&mut self, game_state: &mut G) {
+        self.handle_font_loading();
         self.handle_spritesheet_loading();
         self.prepare_render(game_state);
         self.render(game_state);

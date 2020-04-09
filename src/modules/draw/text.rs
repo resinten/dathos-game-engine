@@ -5,7 +5,7 @@ use super::{DrawCommand, ObjectGeometry, SAMPLER};
 use crate::modules::{GameState, WindowOptions};
 use glyph_brush::rusttype::Scale;
 use glyph_brush::{
-    BrushAction, BrushError, GlyphBrush, GlyphBrushBuilder, GlyphVertex, Layout, Section,
+    BrushAction, BrushError, FontId, GlyphBrush, GlyphBrushBuilder, GlyphVertex, Layout, Section,
 };
 use luminance::context::GraphicsContext;
 use luminance::framebuffer::Framebuffer;
@@ -15,12 +15,14 @@ use luminance::shader::program::Program;
 use luminance::tess::Tess;
 use luminance::texture::{Dim2, GenMipmaps, Texture};
 use nalgebra::Vector2;
+use std::collections::BTreeMap;
 
 const MONTSERRAT_REGULAR: &[u8] = include_bytes!("./text/Montserrat-Regular.ttf");
 
 type TextGeometry = (Vector2<f32>, Vector2<f32>, ObjectGeometry);
 
 pub struct TextProgramBase<'a> {
+    pub fonts: BTreeMap<String, FontId>,
     pub text: Texture<Dim2, NormRGBA8UI>,
     pub brush: GlyphBrush<'a, TextGeometry>,
     pub buffer: Framebuffer<Dim2, NormRGBA8UI, Depth32F>,
@@ -41,6 +43,7 @@ impl<'a> TextProgramBase<'a> {
     {
         let WindowOptions { width, height, .. } = game_state.window_options();
         TextProgramBase {
+            fonts: BTreeMap::new(),
             text: Texture::<Dim2, NormRGBA8UI>::new(
                 graphics_context,
                 [width as u32, height as u32],
@@ -131,6 +134,7 @@ impl<'a, 'b> TextProgram<'a, 'b> {
     {
         commands.iter().for_each(|command| {
             if let DrawCommand::Text {
+                font,
                 depth,
                 color,
                 position,
@@ -147,6 +151,10 @@ impl<'a, 'b> TextProgram<'a, 'b> {
                     screen_position: (position.x, -position.y),
                     text: &text,
                     z: *depth,
+                    font_id: font
+                        .as_ref()
+                        .and_then(|font| self.text.fonts.get(font).copied())
+                        .unwrap_or_else(|| FontId::default()),
                     ..Default::default()
                 });
             }

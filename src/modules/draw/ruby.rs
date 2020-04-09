@@ -15,11 +15,18 @@ class!(DrawQueue);
 
 pub struct DrawQueueInner {
     pub queue: Vec<DrawCommand>,
+    pub pending_fonts: Vec<(String, PathBuf)>,
     pub pending_spritesheets: Vec<SpritesheetLoadRequest>,
     pub pending_sprites: Vec<SpritesheetSlice>,
 }
 
 impl Draw {
+    fn load_font(&mut self, name: String, path: PathBuf) {
+        let mut queue = self.instance_variable_get("@queue");
+        let queue_inner = queue.get_data_mut(&*DRAW_QUEUE_WRAPPER);
+        queue_inner.pending_fonts.push((name, path));
+    }
+
     fn load_spritesheet(&mut self, name: String, path: PathBuf) {
         let mut queue = self.instance_variable_get("@queue");
         let queue_inner = queue.get_data_mut(&*DRAW_QUEUE_WRAPPER);
@@ -56,6 +63,11 @@ impl Draw {
 methods!(
     Draw,
     _itself,
+
+    fn load_font(name: Symbol, path: RString) -> NilClass {
+        _itself.load_font(name.unwrap().to_string(), From::from(path.unwrap().to_string()));
+        NilClass::new()
+    }
 
     fn load_spritesheet(name: Symbol, path: RString) -> NilClass {
         _itself.load_spritesheet(name.unwrap().to_string(), From::from(path.unwrap().to_string()));
@@ -187,6 +199,7 @@ methods!(
     fn draw_text(options: Hash) -> NilClass {
         let options = options.unwrap();
         _itself.draw(DrawCommand::Text {
+            font: options.get_as::<Symbol>("font").map(|f| f.to_string()),
             depth: options.get_num("depth").unwrap_or(1.0),
             color: options.get_as::<ColorData>("color")
                 .map(|c| c.into())
@@ -230,6 +243,7 @@ impl DrawQueue {
             .wrap_data(
                 DrawQueueInner {
                     queue: Vec::new(),
+                    pending_fonts: Vec::new(),
                     pending_spritesheets: Vec::new(),
                     pending_sprites: Vec::new(),
                 },
@@ -241,6 +255,12 @@ impl DrawQueue {
 impl AsMut<Vec<DrawCommand>> for DrawQueue {
     fn as_mut(&mut self) -> &mut Vec<DrawCommand> {
         &mut self.get_data_mut(&*DRAW_QUEUE_WRAPPER).queue
+    }
+}
+
+impl AsMut<Vec<(String, PathBuf)>> for DrawQueue {
+    fn as_mut(&mut self) -> &mut Vec<(String, PathBuf)> {
+        &mut self.get_data_mut(&*DRAW_QUEUE_WRAPPER).pending_fonts
     }
 }
 
