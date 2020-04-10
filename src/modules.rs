@@ -1,7 +1,5 @@
 pub mod core;
 pub mod draw;
-pub mod slack;
-pub mod tone;
 
 pub trait EngineModule<G>
 where
