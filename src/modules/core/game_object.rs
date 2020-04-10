@@ -63,7 +63,7 @@ impl GameObject {
             }
         });
         coroutines.retain(|c| !c.error && !c.done());
-        *AsMut::<Vec<Coroutine>>::as_mut(&mut coroutines_data) = coroutines;
+        AsMut::<Vec<Coroutine>>::as_mut(&mut coroutines_data).append(&mut coroutines);
     }
 
     pub fn tidy_coroutines(&self) {
