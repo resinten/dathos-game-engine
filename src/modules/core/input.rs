@@ -95,8 +95,7 @@ fn get_current_frame() -> u64 {
 }
 
 fn get_key_name(key: Key) -> Option<String> {
-    let result = key
-        .get_name()
+    key.get_name()
         .map(|s| s.to_lowercase())
         .or_else(|| {
             match key {
@@ -137,9 +136,7 @@ fn get_key_name(key: Key) -> Option<String> {
                 _ => &s,
             }
             .to_string()
-        });
-    println!("Key: {:?}", result);
-    result
+        })
 }
 
 pub fn add_input_module() {

@@ -26,7 +26,6 @@ impl FontLoader {
                 println!("Loading font {}", name);
                 let buffer = std::fs::read(path);
                 if let Ok(buffer) = buffer {
-                    println!("Buffer size: {}", buffer.len());
                     let result = self.loaded_fonts.send((name, buffer));
                     if let Err(_) = result {
                         println!("Failed to send a loaded font to the draw module");
