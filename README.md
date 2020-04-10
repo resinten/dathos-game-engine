@@ -61,7 +61,8 @@ Game.create! @child
 ```
 
 You can delete an object later with `Game.delete! @child`.
-_Important!_ all game objects must inherit from `GameObject`!
+
+**Important!** all game objects must inherit from `GameObject`!
 
 ## Coroutines
 
