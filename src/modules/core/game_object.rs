@@ -43,7 +43,9 @@ impl GameObject {
             .instance_variable_get("@coroutines")
             .try_convert_to::<Coroutines>()
             .unwrap();
-        let coroutines = AsMut::<Vec<Coroutine>>::as_mut(&mut coroutines_data);
+        let mut coroutines = AsMut::<Vec<Coroutine>>::as_mut(&mut coroutines_data)
+            .drain(..)
+            .collect::<Vec<Coroutine>>();
         coroutines.iter_mut().for_each(|c| c.schedule(elapsed));
         coroutines.iter_mut().filter(|c| c.ready()).for_each(|c| {
             let yielded = c.block.protect_send("next", &[]);
@@ -61,6 +63,7 @@ impl GameObject {
             }
         });
         coroutines.retain(|c| !c.error && !c.done());
+        *AsMut::<Vec<Coroutine>>::as_mut(&mut coroutines_data) = coroutines;
     }
 
     pub fn tidy_coroutines(&self) {
